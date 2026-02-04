@@ -34,6 +34,7 @@ import {
   LayoutDashboard,
   MoreVertical,
   AlertCircle,
+  Timer,
 } from "lucide-react";
 import { getAnalytics } from "firebase/analytics";
 
@@ -112,7 +113,6 @@ const App = () => {
   const loginWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
     try {
-      // await signInWithRedirect(auth, provider);
       const result = await signInWithPopup(auth, provider);
       console.log("Popup login user:", result.user);
     } catch (err) {
@@ -148,7 +148,7 @@ const App = () => {
     setDataLoading(true);
     const plansRef = query(
       collection(db, "users", user.uid, "plans"),
-      orderBy("startDate", "asc"), // oldest first
+      orderBy("startDate", "asc"),
     );
     const unsubscribe = onSnapshot(
       plansRef,
@@ -157,10 +157,6 @@ const App = () => {
           id: doc.id,
           ...doc.data(),
         }));
-        // // Sort by start date descending (newest first)
-        // const sorted = plansData.sort(
-        //   (a, b) => new Date(b.startDate) - new Date(a.startDate),
-        // );
         setPlans(plansData);
         setDataLoading(false);
       },
@@ -272,7 +268,9 @@ const App = () => {
 
   // --- Views ---
   const ListView = () => (
-    <div className="space-y-6">
+    // Updated: Added max-w-4xl and mx-auto to align width with other views
+    // Updated: Changed space-y-6 to space-y-8 to match vertical rhythm of DetailView
+    <div className="max-w-4xl mx-auto space-y-8 pb-20">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
@@ -458,6 +456,9 @@ const App = () => {
           title: "",
           startDate: "",
           endDate: "",
+          specificDate: "", // New Field
+          duration: "", // New Field
+          dateType: "range", // 'range' | 'specific'
           description: "",
           status: STATUS.NOT_YET,
         },
@@ -472,6 +473,9 @@ const App = () => {
           title: "",
           startDate: "",
           endDate: "",
+          specificDate: "",
+          duration: "",
+          dateType: "range",
           description: "",
           status: STATUS.NOT_YET,
         },
@@ -622,100 +626,175 @@ const App = () => {
             </div>
 
             <div className="space-y-4">
-              {actions.map((action, idx) => (
-                <div
-                  key={action.id}
-                  className="group relative bg-white border border-slate-200 rounded-md p-6 hover:border-indigo-300 hover:shadow-md transition-all duration-300"
-                >
-                  <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                    <button
-                      type="button"
-                      onClick={() => removeAction(idx)}
-                      className="p-2 bg-slate-50 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
-                      title="Remove Action"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <div className="hidden sm:flex flex-col items-center pt-2 gap-2">
-                      <div className="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
-                        {idx + 1}
-                      </div>
-                      <div className="w-px h-full bg-slate-100"></div>
+              {actions.map((action, idx) => {
+                const isSpecific = action.dateType === "specific";
+                return (
+                  <div
+                    key={action.id}
+                    className="group relative bg-white border border-slate-200 rounded-md p-6 hover:border-indigo-300 hover:shadow-md transition-all duration-300"
+                  >
+                    <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                      <button
+                        type="button"
+                        onClick={() => removeAction(idx)}
+                        className="p-2 bg-slate-50 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
+                        title="Remove Action"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
 
-                    <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-x-6 gap-y-4">
-                      {/* Action Title */}
-                      <div className="md:col-span-12 pr-10">
-                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
-                          Action Title
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="What is the specific task?"
-                          className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-indigo-500 outline-none transition-colors font-semibold text-slate-900 placeholder:text-slate-300 placeholder:font-normal text-base"
-                          value={action.title || action.name || ""}
-                          onChange={(e) =>
-                            updateActionField(idx, "title", e.target.value)
-                          }
-                        />
+                    <div className="flex gap-4">
+                      <div className="hidden sm:flex flex-col items-center pt-2 gap-2">
+                        <div className="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
+                          {idx + 1}
+                        </div>
+                        <div className="w-px h-full bg-slate-100"></div>
                       </div>
 
-                      {/* Dates */}
-                      <div className="md:col-span-5">
-                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
-                          Timeline (Start - End)
-                        </label>
-                        <div className="flex items-center gap-2">
+                      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-x-6 gap-y-4">
+                        {/* Action Title */}
+                        <div className="md:col-span-12 pr-10">
+                          <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                            Action Title
+                          </label>
                           <input
-                            type="date"
+                            type="text"
+                            placeholder="What is the specific task?"
+                            className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-indigo-500 outline-none transition-colors font-semibold text-slate-900 placeholder:text-slate-300 placeholder:font-normal text-base"
+                            value={action.title || action.name || ""}
+                            onChange={(e) =>
+                              updateActionField(idx, "title", e.target.value)
+                            }
+                          />
+                        </div>
+
+                        {/* Timing Section (Toggle + Inputs) */}
+                        <div className="md:col-span-5">
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-[10px] font-semibold text-slate-400 uppercase">
+                              Timing
+                            </label>
+                            {/* Toggle Switch */}
+                            <div className="flex bg-slate-100 rounded p-0.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateActionField(idx, "dateType", "range")
+                                }
+                                className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded-sm transition-all ${
+                                  !isSpecific
+                                    ? "bg-white text-indigo-600 shadow-sm"
+                                    : "text-slate-400 hover:text-slate-600"
+                                }`}
+                              >
+                                Range
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateActionField(idx, "dateType", "specific")
+                                }
+                                className={`px-2 py-0.5 text-[9px] font-bold uppercase rounded-sm transition-all ${
+                                  isSpecific
+                                    ? "bg-white text-indigo-600 shadow-sm"
+                                    : "text-slate-400 hover:text-slate-600"
+                                }`}
+                              >
+                                Specific
+                              </button>
+                            </div>
+                          </div>
+
+                          {isSpecific ? (
+                            /* Specific Date Inputs */
+                            <div className="flex items-center gap-2">
+                              <div className="relative flex-1">
+                                <input
+                                  type="date"
+                                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
+                                  value={action.specificDate || ""}
+                                  onChange={(e) =>
+                                    updateActionField(
+                                      idx,
+                                      "specificDate",
+                                      e.target.value,
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="relative w-24">
+                                <input
+                                  type="text"
+                                  placeholder="2h 30m"
+                                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
+                                  value={action.duration || ""}
+                                  onChange={(e) =>
+                                    updateActionField(
+                                      idx,
+                                      "duration",
+                                      e.target.value,
+                                    )
+                                  }
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            /* Range Inputs */
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="date"
+                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
+                                value={action.startDate || ""}
+                                onChange={(e) =>
+                                  updateActionField(
+                                    idx,
+                                    "startDate",
+                                    e.target.value,
+                                  )
+                                }
+                              />
+                              <span className="text-slate-300">-</span>
+                              <input
+                                type="date"
+                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
+                                value={action.endDate || ""}
+                                onChange={(e) =>
+                                  updateActionField(
+                                    idx,
+                                    "endDate",
+                                    e.target.value,
+                                  )
+                                }
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Description */}
+                        <div className="md:col-span-7">
+                          <label className="block text-[10px] font-semibold text-slate-400 uppercase my-1">
+                            Context / Notes
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Add brief details or requirements..."
                             className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
-                            value={action.startDate || ""}
+                            value={action.description || ""}
                             onChange={(e) =>
                               updateActionField(
                                 idx,
-                                "startDate",
+                                "description",
                                 e.target.value,
                               )
                             }
                           />
-                          <span className="text-slate-300">-</span>
-                          <input
-                            type="date"
-                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
-                            value={action.endDate || ""}
-                            onChange={(e) =>
-                              updateActionField(idx, "endDate", e.target.value)
-                            }
-                          />
                         </div>
-                      </div>
-
-                      {/* Description */}
-                      <div className="md:col-span-7">
-                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
-                          Context / Notes
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="Add brief details or requirements..."
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
-                          value={action.description || ""}
-                          onChange={(e) =>
-                            updateActionField(
-                              idx,
-                              "description",
-                              e.target.value,
-                            )
-                          }
-                        />
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </form>
@@ -870,99 +949,136 @@ const App = () => {
               Action Pipeline
             </h3>
             <div className="space-y-3">
-              {selectedPlan.actions.map((action, idx) => (
-                <div
-                  key={action.id}
-                  className={`group relative flex flex-col sm:flex-row gap-4 p-5 rounded-md border transition-all duration-200 ${
-                    action.status === STATUS.FINISHED
-                      ? "bg-slate-50 border-slate-100 opacity-75"
-                      : "bg-white border-slate-200 hover:border-indigo-200 hover:shadow-sm"
-                  }`}
-                >
-                  <div className="flex items-start gap-4 flex-1">
-                    {/* Status Toggle Button */}
-                    <button
-                      onClick={() => cycleStatus(selectedPlan.id, idx)}
-                      disabled={updatingActions[`${selectedPlan.id}-${idx}`]}
-                      className="mt-1 flex-shrink-0 transition-transform active:scale-90"
-                    >
-                      {updatingActions[`${selectedPlan.id}-${idx}`] ? (
-                        <div className="w-6 h-6 border-2 border-slate-300 border-t-transparent rounded-full animate-spin"></div>
-                      ) : action.status === STATUS.FINISHED ? (
-                        <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center shadow-sm shadow-emerald-200">
-                          <CheckCircle2 size={16} className="text-white" />
-                        </div>
-                      ) : action.status === STATUS.PENDING ? (
-                        <div className="w-6 h-6 bg-amber-100 border-2 border-amber-200 rounded-full flex items-center justify-center text-amber-600">
-                          <Clock size={14} />
-                        </div>
-                      ) : (
-                        <div className="w-6 h-6 bg-slate-50 border-2 border-slate-200 rounded-full group-hover:border-indigo-300 transition-colors"></div>
-                      )}
-                    </button>
+              {selectedPlan.actions.map((action, idx) => {
+                const isSpecific = action.dateType === "specific";
+                return (
+                  <div
+                    key={action.id}
+                    className={`group relative flex flex-col sm:flex-row gap-4 p-5 rounded-md border transition-all duration-200 ${
+                      action.status === STATUS.FINISHED
+                        ? "bg-slate-50 border-slate-100 opacity-75"
+                        : "bg-white border-slate-200 hover:border-indigo-200 hover:shadow-sm"
+                    }`}
+                  >
+                    <div className="flex items-start gap-4 flex-1">
+                      {/* Status Toggle Button */}
+                      <button
+                        onClick={() => cycleStatus(selectedPlan.id, idx)}
+                        disabled={updatingActions[`${selectedPlan.id}-${idx}`]}
+                        className="mt-1 flex-shrink-0 transition-transform active:scale-90"
+                      >
+                        {updatingActions[`${selectedPlan.id}-${idx}`] ? (
+                          <div className="w-6 h-6 border-2 border-slate-300 border-t-transparent rounded-full animate-spin"></div>
+                        ) : action.status === STATUS.FINISHED ? (
+                          <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center shadow-sm shadow-emerald-200">
+                            <CheckCircle2 size={16} className="text-white" />
+                          </div>
+                        ) : action.status === STATUS.PENDING ? (
+                          <div className="w-6 h-6 bg-amber-100 border-2 border-amber-200 rounded-full flex items-center justify-center text-amber-600">
+                            <Clock size={14} />
+                          </div>
+                        ) : (
+                          <div className="w-6 h-6 bg-slate-50 border-2 border-slate-200 rounded-full group-hover:border-indigo-300 transition-colors"></div>
+                        )}
+                      </button>
 
-                    <div className="space-y-1.5 w-full">
-                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-                        <span
-                          className={`text-base font-semibold transition-colors ${
-                            action.status === STATUS.FINISHED
-                              ? "text-slate-400 line-through decoration-slate-300"
-                              : "text-slate-900"
-                          }`}
-                        >
-                          {action.title || action.name}
-                        </span>
+                      <div className="space-y-1.5 w-full">
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                          <span
+                            className={`text-base font-semibold transition-colors ${
+                              action.status === STATUS.FINISHED
+                                ? "text-slate-400 line-through decoration-slate-300"
+                                : "text-slate-900"
+                            }`}
+                          >
+                            {action.title || action.name}
+                          </span>
 
-                        <button
-                          onClick={() => cycleStatus(selectedPlan.id, idx)}
-                          className={`self-start text-[10px] font-semibold uppercase px-2 py-1 rounded-md border transition-all ${STATUS_COLORS[action.status]}`}
-                        >
-                          {STATUS_LABELS[action.status]}
-                        </button>
+                          <button
+                            onClick={() => cycleStatus(selectedPlan.id, idx)}
+                            className={`self-start text-[10px] font-semibold uppercase px-2 py-1 rounded-md border transition-all ${STATUS_COLORS[action.status]}`}
+                          >
+                            {STATUS_LABELS[action.status]}
+                          </button>
+                        </div>
+
+                        {(action.description ||
+                          action.startDate ||
+                          action.endDate ||
+                          action.specificDate) && (
+                          <div className="pt-1 space-y-2">
+                            {/* Description */}
+                            {action.description && (
+                              <p
+                                className={`text-sm leading-relaxed ${action.status === STATUS.FINISHED ? "text-slate-400" : "text-slate-600"}`}
+                              >
+                                {action.description}
+                              </p>
+                            )}
+
+                            {/* Date Meta Logic */}
+                            {(action.startDate ||
+                              action.endDate ||
+                              action.specificDate) && (
+                              <div className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-50 pe-2 py-1 rounded-md">
+                                {isSpecific ? (
+                                  <>
+                                    <Calendar size={12} />
+                                    <span>
+                                      {action.specificDate
+                                        ? new Date(
+                                            action.specificDate,
+                                          ).toLocaleDateString("en-GB", {
+                                            month: "short",
+                                            day: "numeric",
+                                          })
+                                        : "No Date"}
+                                    </span>
+                                    {action.duration && (
+                                      <>
+                                        <span className="text-slate-300 mx-1">
+                                          |
+                                        </span>
+                                        <Timer size={12} />
+                                        <span>{action.duration}</span>
+                                      </>
+                                    )}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Calendar size={12} />
+                                    <span>
+                                      {action.startDate
+                                        ? new Date(
+                                            action.startDate,
+                                          ).toLocaleDateString("en-GB", {
+                                            month: "short",
+                                            day: "numeric",
+                                          })
+                                        : ""}
+                                      {action.startDate &&
+                                        action.endDate &&
+                                        " - "}
+                                      {action.endDate
+                                        ? new Date(
+                                            action.endDate,
+                                          ).toLocaleDateString("en-GB", {
+                                            month: "short",
+                                            day: "numeric",
+                                          })
+                                        : ""}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-
-                      {(action.description ||
-                        action.startDate ||
-                        action.endDate) && (
-                        <div className="pt-1 space-y-2">
-                          {/* Description */}
-                          {action.description && (
-                            <p
-                              className={`text-sm leading-relaxed ${action.status === STATUS.FINISHED ? "text-slate-400" : "text-slate-600"}`}
-                            >
-                              {action.description}
-                            </p>
-                          )}
-
-                          {/* Date Meta */}
-                          {(action.startDate || action.endDate) && (
-                            <div className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-50 pe-2 py-1 rounded-md">
-                              <Calendar size={12} />
-                              <span>
-                                {action.startDate
-                                  ? new Date(
-                                      action.startDate,
-                                    ).toLocaleDateString("en-GB", {
-                                      month: "short",
-                                      day: "numeric",
-                                    })
-                                  : ""}
-                                {action.startDate && action.endDate && " - "}
-                                {action.endDate
-                                  ? new Date(action.endDate).toLocaleDateString(
-                                      "en-GB",
-                                      { month: "short", day: "numeric" },
-                                    )
-                                  : ""}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
