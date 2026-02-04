@@ -19,6 +19,7 @@ import {
   updateDoc,
   deleteDoc,
   query,
+  orderBy,
 } from "firebase/firestore";
 import {
   ChevronRight,
@@ -78,8 +79,8 @@ const STATUS_COLORS = {
 const ProgressBar = ({ percentage }) => (
   <div className="w-full">
     <div className="flex justify-between items-center mb-1">
-      <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-        Execution Progress
+      <span className="text-xs font-medium text-slate-400 uppercase">
+        Overall Progress
       </span>
       <span className="text-xs font-bold text-slate-900">
         {Math.round(percentage)}%
@@ -145,7 +146,10 @@ const App = () => {
     if (!user) return;
 
     setDataLoading(true);
-    const plansRef = collection(db, "users", user.uid, "plans");
+    const plansRef = query(
+      collection(db, "users", user.uid, "plans"),
+      orderBy("startDate", "asc"), // oldest first
+    );
     const unsubscribe = onSnapshot(
       plansRef,
       (snapshot) => {
@@ -153,11 +157,11 @@ const App = () => {
           id: doc.id,
           ...doc.data(),
         }));
-        // Sort by start date descending (newest first)
-        const sorted = plansData.sort(
-          (a, b) => new Date(b.startDate) - new Date(a.startDate),
-        );
-        setPlans(sorted);
+        // // Sort by start date descending (newest first)
+        // const sorted = plansData.sort(
+        //   (a, b) => new Date(b.startDate) - new Date(a.startDate),
+        // );
+        setPlans(plansData);
         setDataLoading(false);
       },
       (err) => {
@@ -251,6 +255,21 @@ const App = () => {
   // --- Derived State ---
   const selectedPlan = plans.find((p) => p.id === selectedPlanId);
 
+  const getDaysLeft = (endDate) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(endDate);
+    target.setHours(0, 0, 0, 0);
+
+    const diffInMs = target - today;
+    const diffInDays = Math.ceil(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInDays < 0) return "Overdue";
+    if (diffInDays === 0) return "Due Today";
+    if (diffInDays === 1) return "1 day left";
+    return `${diffInDays} days left`;
+  };
+
   // --- Views ---
   const ListView = () => (
     <div className="space-y-6">
@@ -292,6 +311,11 @@ const App = () => {
               plan.actions.length > 0
                 ? (finishedCount / plan.actions.length) * 100
                 : 0;
+            const daysLeft = getDaysLeft(plan.endDate);
+            const isUrgent =
+              daysLeft === "Overdue" ||
+              daysLeft === "Due Today" ||
+              daysLeft.includes("1 day");
 
             return (
               <div
@@ -303,16 +327,14 @@ const App = () => {
                 className="group bg-white border border-slate-200 rounded-xl p-5 hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer relative"
               >
                 <div className="flex justify-between items-start mb-4">
-                  <div>
+                  <div className="w-3/5">
                     <h3 className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
                       {plan.title}
                     </h3>
-                    <p className="text-xs font-medium text-slate-400 mt-1 uppercase tracking-wider">
-                      Deadline:{" "}
-                      {new Date(plan.endDate).toLocaleDateString("en-GB", {
-                        day: "2-digit",
-                        month: "short",
-                      })}
+                    <p
+                      className={`text-xs font-bold mt-3 ${isUrgent ? "text-rose-500" : "text-slate-500"}`}
+                    >
+                      {daysLeft}
                     </p>
                   </div>
                   <div className="text-right">
@@ -431,14 +453,28 @@ const App = () => {
     const [endDate, setEndDate] = useState(initialData?.endDate || "");
     const [actions, setActions] = useState(
       initialData?.actions || [
-        { id: crypto.randomUUID(), name: "", status: STATUS.NOT_YET },
+        {
+          id: crypto.randomUUID(),
+          title: "",
+          startDate: "",
+          endDate: "",
+          description: "",
+          status: STATUS.NOT_YET,
+        },
       ],
     );
 
     const addAction = () => {
       setActions([
         ...actions,
-        { id: crypto.randomUUID(), name: "", status: STATUS.NOT_YET },
+        {
+          id: crypto.randomUUID(),
+          title: "",
+          startDate: "",
+          endDate: "",
+          description: "",
+          status: STATUS.NOT_YET,
+        },
       ]);
     };
 
@@ -446,132 +482,243 @@ const App = () => {
       setActions(actions.filter((_, i) => i !== index));
     };
 
-    const updateActionName = (index, value) => {
+    const updateActionField = (index, field, value) => {
       const newActions = [...actions];
-      newActions[index].name = value;
+      newActions[index][field] = value;
       setActions(newActions);
     };
 
     const handleSubmit = (e) => {
-      e.preventDefault();
-      const validActions = actions.filter((a) => a.name.trim() !== "");
+      if (e) e.preventDefault();
+      const validActions = actions.filter(
+        (a) =>
+          (a.title && a.title.trim() !== "") ||
+          (a.name && a.name.trim() !== ""),
+      );
+
       if (!title || !endDate || validActions.length === 0) {
-        alert("Please provide a title, deadline, and at least one action.");
+        alert(
+          "Please provide a plan title, deadline, and at least one valid action title.",
+        );
         return;
       }
-      savePlan({ title, startDate, endDate, actions: validActions });
+
+      const formattedActions = validActions.map((a) => ({
+        ...a,
+        name: a.title || a.name,
+        title: a.title || a.name,
+      }));
+
+      savePlan({ title, startDate, endDate, actions: formattedActions });
     };
 
     return (
-      <div className="max-w-2xl mx-auto">
-        <button
-          onClick={() => setView("list")}
-          className="flex items-center gap-1 text-slate-500 hover:text-slate-900 mb-6 transition-colors font-medium"
-        >
-          <ArrowLeft size={18} /> Back to Dashboard
-        </button>
+      <div className="max-w-4xl mx-auto pb-20">
+        {/* Header Navigation with Action Button */}
+        <div className="flex items-center justify-between mb-8">
+          <button
+            onClick={() => {
+              setView((prev) => (prev === "list" ? "detail" : "list"));
+            }}
+            className="group flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-medium text-sm"
+          >
+            <div className="p-2 bg-white border border-slate-200 rounded-md group-hover:border-indigo-300 transition-all">
+              <ArrowLeft size={16} />
+            </div>
+            <span>Cancel & Return</span>
+          </button>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">
-          <h2 className="text-xl font-bold text-slate-900 mb-6">
-            {initialData ? "Edit Weekly Plan" : "Create Weekly Plan"}
-          </h2>
+          <button
+            onClick={handleSubmit}
+            disabled={savingPlan}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-sm text-sm font-semibold"
+          >
+            {savingPlan ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-md animate-spin"></div>
+                Saving...
+              </>
+            ) : initialData ? (
+              "Save Changes"
+            ) : (
+              "Create Plan"
+            )}
+          </button>
+        </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 gap-6">
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* MASTER SETTINGS CARD */}
+          <div className="bg-white border border-slate-200 rounded-md p-6 md:p-8 shadow-xs">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600">
+                <Calendar size={20} />
+              </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
-                  Week Title
+                <h3 className="font-bold text-slate-900">Weekly Overview</h3>
+                <p className="text-xs text-slate-500">
+                  Define the timeline and primary objective.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+              <div className="md:col-span-12">
+                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  Objective Title
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Week 12 - Product Launch Focus"
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-slate-900"
+                  placeholder="e.g. Week 12 - Q1 Performance Review"
+                  className="w-full px-4 py-3 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-sm text-slate-900 font-medium placeholder:text-slate-300"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs sm:text-sm font-medium"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
-                    Deadline
-                  </label>
-                  <input
-                    type="date"
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-xs sm:text-sm font-medium"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                  />
-                </div>
+              <div className="md:col-span-6">
+                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  className="w-full px-4 py-3 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-sm font-medium text-slate-700"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </div>
+              <div className="md:col-span-6">
+                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  Target Deadline
+                </label>
+                <input
+                  type="date"
+                  className="w-full px-4 py-3 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all text-sm font-medium text-slate-700"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
               </div>
             </div>
+          </div>
 
-            <div className="pt-4 border-t border-slate-100">
-              <div className="flex justify-between items-center mb-4">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">
-                  Key Actions
-                </label>
-                <button
-                  type="button"
-                  onClick={addAction}
-                  className="text-indigo-600 hover:text-indigo-700 font-bold text-xs uppercase tracking-wider flex items-center gap-1"
-                >
-                  <Plus size={14} /> Add Action
-                </button>
+          {/* ACTION ITEMS SECTION */}
+          <div>
+            <div className="flex justify-between items-end mb-4 px-1">
+              <div>
+                <h3 className="font-bold text-slate-900 text-lg">
+                  Execution Plan
+                </h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Break down the objective into actionable steps.
+                </p>
               </div>
+              <button
+                type="button"
+                onClick={addAction}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:border-indigo-300 text-slate-700 hover:text-indigo-600 text-xs font-semibold uppercase rounded-md transition-all shadow-xs"
+              >
+                <Plus size={16} />
+                Add Step
+              </button>
+            </div>
 
-              <div className="space-y-3">
-                {actions.map((action, idx) => (
-                  <div key={action.id} className="flex gap-2 group">
-                    <input
-                      type="text"
-                      placeholder="Identify specific outcome..."
-                      className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                      value={action.name}
-                      onChange={(e) => updateActionName(idx, e.target.value)}
-                    />
+            <div className="space-y-4">
+              {actions.map((action, idx) => (
+                <div
+                  key={action.id}
+                  className="group relative bg-white border border-slate-200 rounded-md p-6 hover:border-indigo-300 hover:shadow-md transition-all duration-300"
+                >
+                  <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                     <button
                       type="button"
                       onClick={() => removeAction(idx)}
-                      className="p-3 text-slate-300 hover:text-rose-500 transition-colors"
-                      title="Remove"
+                      className="p-2 bg-slate-50 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
+                      title="Remove Action"
                     >
-                      <Trash2 size={18} />
+                      <Trash2 size={16} />
                     </button>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={savingPlan}
-              className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200 mt-4 flex items-center justify-center gap-2"
-            >
-              {savingPlan ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Saving...
-                </>
-              ) : initialData ? (
-                "Update Plan"
-              ) : (
-                "Save Weekly Plan"
-              )}
-            </button>
-          </form>
-        </div>
+                  <div className="flex gap-4">
+                    <div className="hidden sm:flex flex-col items-center pt-2 gap-2">
+                      <div className="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
+                        {idx + 1}
+                      </div>
+                      <div className="w-px h-full bg-slate-100"></div>
+                    </div>
+
+                    <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-x-6 gap-y-4">
+                      {/* Action Title */}
+                      <div className="md:col-span-12 pr-10">
+                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                          Action Title
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="What is the specific task?"
+                          className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-indigo-500 outline-none transition-colors font-semibold text-slate-900 placeholder:text-slate-300 placeholder:font-normal text-base"
+                          value={action.title || action.name || ""}
+                          onChange={(e) =>
+                            updateActionField(idx, "title", e.target.value)
+                          }
+                        />
+                      </div>
+
+                      {/* Dates */}
+                      <div className="md:col-span-5">
+                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                          Timeline (Start - End)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="date"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
+                            value={action.startDate || ""}
+                            onChange={(e) =>
+                              updateActionField(
+                                idx,
+                                "startDate",
+                                e.target.value,
+                              )
+                            }
+                          />
+                          <span className="text-slate-300">-</span>
+                          <input
+                            type="date"
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
+                            value={action.endDate || ""}
+                            onChange={(e) =>
+                              updateActionField(idx, "endDate", e.target.value)
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      {/* Description */}
+                      <div className="md:col-span-7">
+                        <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                          Context / Notes
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Add brief details or requirements..."
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-indigo-500 outline-none text-xs text-slate-600 font-medium"
+                          value={action.description || ""}
+                          onChange={(e) =>
+                            updateActionField(
+                              idx,
+                              "description",
+                              e.target.value,
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </form>
       </div>
     );
   };
@@ -585,190 +732,237 @@ const App = () => {
     const pending = selectedPlan.actions.filter(
       (a) => a.status === STATUS.PENDING,
     );
-    const notStarted = selectedPlan.actions.filter(
-      (a) => a.status === STATUS.NOT_YET,
-    );
     const progress = (finished.length / selectedPlan.actions.length) * 100;
+    const daysLeft = getDaysLeft(selectedPlan.endDate);
 
     return (
-      <div className="max-w-3xl mx-auto space-y-6">
+      <div className="max-w-4xl mx-auto space-y-8 pb-20">
+        {/* Navigation Bar */}
         <div className="flex items-center justify-between">
           <button
             onClick={() => setView("list")}
-            className="flex items-center gap-1 text-slate-500 hover:text-slate-900 transition-colors font-medium"
+            className="group flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-medium text-sm"
           >
-            <ArrowLeft size={18} /> All Plans
+            <div className="p-2 bg-white border border-slate-200 rounded-md group-hover:border-indigo-300 transition-all">
+              <ArrowLeft size={16} />
+            </div>
+            <span>Dashboard</span>
           </button>
+
           <div className="flex gap-2">
             <button
               onClick={() => setView("edit")}
-              className="p-2 text-slate-400 hover:text-slate-600 transition-colors rounded-lg border border-transparent hover:border-slate-200"
+              className="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:text-slate-700 hover:border-slate-300 rounded-lg transition-all text-sm font-semibold"
             >
-              Edit Plan
+              Edit
             </button>
             <button
               onClick={() => deletePlan(selectedPlan.id)}
               disabled={deletingPlan}
-              className="p-2 text-slate-400 hover:text-rose-600 transition-colors rounded-lg border border-transparent hover:border-rose-100 flex items-center justify-center"
+              className="px-4 py-2 bg-white border border-slate-200 text-rose-500 hover:bg-rose-50 hover:border-rose-200 rounded-md transition-all text-sm font-semibold flex items-center"
             >
-              {deletingPlan ? (
-                <div className="w-4 h-4 border-2 border-rose-400 border-t-transparent rounded-full animate-spin"></div>
-              ) : (
-                <Trash2 size={18} />
-              )}
+              {deletingPlan ? "..." : "Delete"}
             </button>
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-          <div className="p-8 border-b border-slate-100">
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-              <div className="space-y-4">
-                <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-tight">
-                  {selectedPlan.title}
-                </h2>
-                {/* <div className="flex items-center gap-4 mt-3 text-sm font-semibold">
-                  <span className="text-slate-400 uppercase tracking-widest">
-                    Single Deadline:
+        {/* Hero Section */}
+        <div className="bg-white border border-slate-200 rounded-md p-8 shadow-xs relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+            <BarChart3 size={120} className="text-indigo-600" />
+          </div>
+
+          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-8">
+            <div className="space-y-4 max-w-lg">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-400">
+                <Calendar size={14} />
+                <span>Weekly Sprint</span>
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight leading-tight">
+                {selectedPlan.title}
+              </h2>
+              <div className="flex items-center gap-4 text-sm font-medium text-slate-600">
+                <span
+                  className={`px-3 py-1 rounded-full border ${daysLeft.includes("Overdue") ? "bg-rose-50 border-rose-100 text-rose-600" : "bg-slate-50 border-slate-200 text-slate-600"}`}
+                >
+                  {daysLeft}
+                </span>
+                <span className="text-slate-400">
+                  {new Date(selectedPlan.startDate).toLocaleDateString(
+                    undefined,
+                    { month: "short", day: "numeric" },
+                  )}{" "}
+                  —{" "}
+                  {new Date(selectedPlan.endDate).toLocaleDateString(
+                    undefined,
+                    { month: "short", day: "numeric" },
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col items-end">
+              <div className="text-5xl font-black text-indigo-600 tracking-tighter">
+                {Math.round(progress)}%
+              </div>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">
+                Completion
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left Column: Stats */}
+          <div className="lg:col-span-1 space-y-4">
+            <div className="bg-white border border-slate-200 rounded-md p-6 shadow-xs">
+              <h3 className="text-xs font-semibold text-slate-400 uppercase mb-4">
+                Plan Status
+              </h3>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center p-3 bg-slate-50 rounded-md border border-slate-100">
+                  <span className="text-sm font-semibold text-slate-600">
+                    Total Tasks
                   </span>
-                  <span className="px-3 py-1 bg-rose-50 text-rose-600 rounded-md border border-rose-100">
-                    {new Date(selectedPlan.endDate).toLocaleDateString(
-                      "en-GB",
-                      { day: "2-digit", month: "long", year: "numeric" },
-                    )}
+                  <span className="text-sm font-bold text-slate-900">
+                    {selectedPlan.actions.length}
                   </span>
-                </div> */}
-                <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-sm font-semibold">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 uppercase tracking-widest text-[10px]">
-                      Start:
-                    </span>
-                    <span className="text-slate-700">
-                      {new Date(selectedPlan.startDate).toLocaleDateString(
-                        "en-GB",
-                        { day: "2-digit", month: "long", year: "numeric" },
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400 uppercase tracking-widest text-[10px]">
-                      Deadline:
-                    </span>
-                    <span className="px-3 py-1 bg-rose-50 text-rose-600 rounded-md border border-rose-100">
-                      {new Date(selectedPlan.endDate).toLocaleDateString(
-                        "en-GB",
-                        { day: "2-digit", month: "long", year: "numeric" },
-                      )}
-                    </span>
-                  </div>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-emerald-50 rounded-md border border-emerald-100">
+                  <span className="text-sm font-semibold text-emerald-700">
+                    Completed
+                  </span>
+                  <span className="text-sm font-bold text-emerald-800">
+                    {finished.length}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-amber-50 rounded-md border border-amber-100">
+                  <span className="text-sm font-semibold text-amber-700">
+                    In Progress
+                  </span>
+                  <span className="text-sm font-bold text-amber-800">
+                    {pending.length}
+                  </span>
                 </div>
               </div>
-              <div className="text-right min-w-[140px]">
-                <div className="text-4xl font-black text-indigo-600 leading-none">
-                  {Math.round(progress)}%
-                </div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                  Efficiency
-                </div>
-              </div>
+            </div>
+
+            {/* UPDATED FOCUS NOTE */}
+            <div className="bg-indigo-50/50 border border-indigo-100 rounded-md p-6 shadow-sm">
+              <h4 className="font-bold flex items-center gap-2 mb-2 text-indigo-900">
+                <AlertCircle size={16} className="text-indigo-600" />
+                Focus Note
+              </h4>
+              <p className="text-sm text-indigo-800/80 leading-relaxed">
+                Prioritize tasks marked as "Pending" to maintain momentum.
+                Ensure all tasks are cleared by{" "}
+                <span className="font-semibold text-indigo-900">
+                  {new Date(selectedPlan.endDate).toLocaleDateString()}
+                </span>
+                .
+              </p>
             </div>
           </div>
 
-          <div className="p-8 space-y-8">
-            {/* Progress Grid */}
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <div className="text-xl font-bold text-slate-900">
-                  {selectedPlan.actions.length}
-                </div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Total
-                </div>
-              </div>
-              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                <div className="text-xl font-bold text-emerald-700">
-                  {finished.length}
-                </div>
-                <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">
-                  Finished
-                </div>
-              </div>
-              <div className="bg-amber-50 p-4 rounded-xl border border-amber-100">
-                <div className="text-xl font-bold text-amber-700">
-                  {pending.length}
-                </div>
-                <div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">
-                  Pending
-                </div>
-              </div>
-            </div>
-
-            {/* Action List */}
-            <div>
-              <h3 className="text-xs text-slate-400 uppercase mb-4">
-                Action Pipeline
-              </h3>
-              <div className="space-y-3">
-                {selectedPlan.actions.map((action, idx) => (
-                  <div
-                    key={action.id}
-                    className="flex items-center justify-between p-4 rounded-xl border border-slate-100 bg-white hover:bg-slate-50 transition-colors group"
-                  >
-                    <div className="flex items-center gap-4 flex-1">
-                      <button
-                        onClick={() => cycleStatus(selectedPlan.id, idx)}
-                        disabled={updatingActions[`${selectedPlan.id}-${idx}`]}
-                        className={`transition-colors flex-shrink-0 ${
-                          action.status === STATUS.FINISHED
-                            ? "text-emerald-500"
-                            : action.status === STATUS.PENDING
-                              ? "text-amber-500"
-                              : "text-slate-300"
-                        }`}
-                      >
-                        {updatingActions[`${selectedPlan.id}-${idx}`] ? (
-                          <div className="w-6 h-6 border-2 border-slate-300 border-t-transparent rounded-full animate-spin"></div>
-                        ) : action.status === STATUS.FINISHED ? (
-                          <CheckCircle2 size={24} />
-                        ) : action.status === STATUS.PENDING ? (
-                          <Clock size={24} />
-                        ) : (
-                          <Circle size={24} />
-                        )}
-                      </button>
-                      <span
-                        className={`text-slate-700 ${action.status === STATUS.FINISHED ? "line-through text-slate-400 font-normal" : ""}`}
-                      >
-                        {action.name}
-                      </span>
-                    </div>
-
+          {/* Right Column: Actions */}
+          <div className="lg:col-span-2 space-y-4">
+            <h3 className="text-xs font-semibold text-slate-400 uppercase px-1">
+              Action Pipeline
+            </h3>
+            <div className="space-y-3">
+              {selectedPlan.actions.map((action, idx) => (
+                <div
+                  key={action.id}
+                  className={`group relative flex flex-col sm:flex-row gap-4 p-5 rounded-md border transition-all duration-200 ${
+                    action.status === STATUS.FINISHED
+                      ? "bg-slate-50 border-slate-100 opacity-75"
+                      : "bg-white border-slate-200 hover:border-indigo-200 hover:shadow-sm"
+                  }`}
+                >
+                  <div className="flex items-start gap-4 flex-1">
+                    {/* Status Toggle Button */}
                     <button
                       onClick={() => cycleStatus(selectedPlan.id, idx)}
-                      className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg border transition-all ${STATUS_COLORS[action.status]}`}
+                      disabled={updatingActions[`${selectedPlan.id}-${idx}`]}
+                      className="mt-1 flex-shrink-0 transition-transform active:scale-90"
                     >
-                      {STATUS_LABELS[action.status]}
+                      {updatingActions[`${selectedPlan.id}-${idx}`] ? (
+                        <div className="w-6 h-6 border-2 border-slate-300 border-t-transparent rounded-full animate-spin"></div>
+                      ) : action.status === STATUS.FINISHED ? (
+                        <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center shadow-sm shadow-emerald-200">
+                          <CheckCircle2 size={16} className="text-white" />
+                        </div>
+                      ) : action.status === STATUS.PENDING ? (
+                        <div className="w-6 h-6 bg-amber-100 border-2 border-amber-200 rounded-full flex items-center justify-center text-amber-600">
+                          <Clock size={14} />
+                        </div>
+                      ) : (
+                        <div className="w-6 h-6 bg-slate-50 border-2 border-slate-200 rounded-full group-hover:border-indigo-300 transition-colors"></div>
+                      )}
                     </button>
-                  </div>
-                ))}
-              </div>
-            </div>
 
-            <div className="p-5 bg-slate-900 rounded-xl text-white">
-              <div className="flex items-start gap-4">
-                <div className="p-2 bg-white/10 rounded-lg">
-                  <AlertCircle className="text-indigo-300" size={20} />
+                    <div className="space-y-1.5 w-full">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                        <span
+                          className={`text-base font-semibold transition-colors ${
+                            action.status === STATUS.FINISHED
+                              ? "text-slate-400 line-through decoration-slate-300"
+                              : "text-slate-900"
+                          }`}
+                        >
+                          {action.title || action.name}
+                        </span>
+
+                        <button
+                          onClick={() => cycleStatus(selectedPlan.id, idx)}
+                          className={`self-start text-[10px] font-semibold uppercase px-2 py-1 rounded-md border transition-all ${STATUS_COLORS[action.status]}`}
+                        >
+                          {STATUS_LABELS[action.status]}
+                        </button>
+                      </div>
+
+                      {(action.description ||
+                        action.startDate ||
+                        action.endDate) && (
+                        <div className="pt-1 space-y-2">
+                          {/* Description */}
+                          {action.description && (
+                            <p
+                              className={`text-sm leading-relaxed ${action.status === STATUS.FINISHED ? "text-slate-400" : "text-slate-600"}`}
+                            >
+                              {action.description}
+                            </p>
+                          )}
+
+                          {/* Date Meta */}
+                          {(action.startDate || action.endDate) && (
+                            <div className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-50 pe-2 py-1 rounded-md">
+                              <Calendar size={12} />
+                              <span>
+                                {action.startDate
+                                  ? new Date(
+                                      action.startDate,
+                                    ).toLocaleDateString("en-GB", {
+                                      month: "short",
+                                      day: "numeric",
+                                    })
+                                  : ""}
+                                {action.startDate && action.endDate && " - "}
+                                {action.endDate
+                                  ? new Date(action.endDate).toLocaleDateString(
+                                      "en-GB",
+                                      { month: "short", day: "numeric" },
+                                    )
+                                  : ""}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-bold text-sm">Deadline Focus</h4>
-                  <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                    All {selectedPlan.actions.length} items in this list are
-                    tethered to the{" "}
-                    {new Date(selectedPlan.endDate).toLocaleDateString()}{" "}
-                    deadline. Prioritize execution over perfection.
-                  </p>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>
